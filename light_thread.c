@@ -3,18 +3,18 @@
 #include <stdio.h>
 #include <ucontext.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 void schedule_init(size_t stack_size) {
-	Queue * pNewQueue = queue_new();
+	TaskQueue * pTaskQueue = task_queue_make();
 	PSchdule = (Schdule *) malloc(sizeof(Schdule));
-	PSchdule->pExecuteQueue = pNewQueue;
+	PSchdule->pExecuteQueue = pTaskQueue;
 	PSchdule->pcontext = NULL;
 	PSchdule->stack_size = stack_size;
 }
 
-void light_thread_create(coroutine_func co_func) {
-	LightThreadTask * p_light_thread_task = (LightThreadTask *) malloc(
-			sizeof(LightThreadTask));
+void light_thread_create(coroutine_func co_func, void * arg) {
+	LightThreadTask * p_light_thread_task = (LightThreadTask *) malloc(sizeof(LightThreadTask));
 
 	// 上下文设置
 	getcontext(&p_light_thread_task->context);
@@ -29,10 +29,14 @@ void light_thread_create(coroutine_func co_func) {
 	p_light_thread_task->co_func = co_func;
 
 	// 设置下一条执行函数
-	makecontext(&(p_light_thread_task->context), p_light_thread_task->co_func, 0, NULL);
+	if (arg != NULL) {
+		makecontext(&(p_light_thread_task->context), (void (*)(void)) (p_light_thread_task->co_func), 1, arg);
+	} else {
+		makecontext(&(p_light_thread_task->context), (void (*)(void)) (p_light_thread_task->co_func), 0, NULL);
+	}
 
 	// 压入运行队列
-	queue_push(PSchdule->pExecuteQueue, (void *) p_light_thread_task);
+	light_thread_resume(p_light_thread_task);
 }
 
 int light_thread_yield() {
@@ -42,17 +46,29 @@ int light_thread_yield() {
 	return ret;
 }
 
+int light_thread_wait() {
+	PSchdule->yield = FALSE;
+	// 临时退出
+	int ret = swapcontext(&(PSchdule->p_curLightThreadTask->context), &(PSchdule->main_context));
+	return ret;
+}
+
+void light_thread_resume(LightThreadTask * pLightThreadTask) {
+	put_task(PSchdule->pExecuteQueue, (void *) pLightThreadTask);
+}
+
 void schedule_start() {
 	while (1) {
 		// 获取上下文
 		getcontext(&(PSchdule->main_context));
-		if (PSchdule->yield == TRUE) {
+		if (PSchdule->yield) {
 			// 压入队列
-			queue_push(PSchdule->pExecuteQueue, (void *) PSchdule->p_curLightThreadTask);
+			// queue_push(PSchdule->pExecuteQueue, (void *) PSchdule->p_curLightThreadTask);
+			put_task(PSchdule->pExecuteQueue, (Task *) (PSchdule->p_curLightThreadTask));
 		}
 
 		// get task from queue
-		LightThreadTask * pTask = (LightThreadTask *) queue_pop( PSchdule->pExecuteQueue);
+		LightThreadTask * pTask = (LightThreadTask *) take_task(PSchdule->pExecuteQueue);
 		if (pTask != NULL) {
 			// 切换进入pTask
 			// 保存上下文
@@ -62,9 +78,30 @@ void schedule_start() {
 			// 开始执行上下文
 			setcontext(&pTask->context);
 		} else {
-			return ;
+			return;
 		}
 	}
+}
+
+void* __schedule_start(void * arg) {
+	schedule_start();
+	return NULL;
+}
+
+int schedule_start_in_thread() {
+	pthread_t thread;
+	int ret;
+	ret = pthread_create(&thread, NULL, __schedule_start, NULL);
+	if (ret < 0) {
+		return ret;
+	}
+
+	ret = pthread_detach(thread);
+	if (ret < 0) {
+		return ret;
+	}
+
+	return 0;
 }
 
 char * make_stack() {

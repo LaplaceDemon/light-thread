@@ -9,7 +9,7 @@
 #include "light_thread.h"
 #include <stdio.h>
 
-void test_task0() {
+void test_task0(void * arg) {
     printf("%d\n", 1);
     printf("%d\n", 2);
     printf("%d\n", 3);
@@ -21,7 +21,7 @@ void test_task0() {
     printf("%d\n", 6);
 }
 
-void test_task1() {
+void test_task1(void * arg) {
     printf("%d\n", 11);
     printf("%d\n", 12);
     printf("%d\n", 13);
@@ -34,11 +34,11 @@ void test_task1() {
 }
 
 
-int main() {
+int main2() {
     schedule_init(8192);
 
-    light_thread_create(test_task0);
-    light_thread_create(test_task1);
+    light_thread_create(test_task0, NULL);
+    light_thread_create(test_task1, NULL);
 
     schedule_start();
     return 0;
